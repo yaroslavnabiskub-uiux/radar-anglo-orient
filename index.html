@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Navigation Radar — Production Component</title>
+
+<!--
+  PRODUCTION NOTES FOR DEV
+  ========================
+  This is a live SVG + vanilla JS component, not a video. That's
+  deliberate: it gives you a real transparent background on every
+  browser (including Safari/iOS, where transparent WebM/MP4 is not
+  reliably supported), it's ~11KB instead of multiple MB, it scales
+  to any size since it's vector, and it keeps working if a location
+  needs to move or a 4th office gets added later.
+
+  Everything between the COPY markers below is self-contained:
+  drop it into the page wherever the radar should appear. It has no
+  background of its own — it will show whatever is behind it on the
+  real page. Nothing outside the COPY markers (the checkerboard, the
+  page centering) is part of the component; that's just this file's
+  own preview scaffolding so transparency is visible when you open
+  this file directly.
+
+  Things you can adjust — all called out inline below:
+  - LOCATIONS array: add/remove/move cities
+  - ROTATION_MS: sweep speed
+  - Colors and sizes: CSS variables at the top of the style block
+-->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  /* ============ preview-only scaffolding (not part of the component) ============ */
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* checkerboard so transparency is obviously real when previewing this file */
+    background-image:
+      linear-gradient(45deg, #e5e7eb 25%, transparent 25%),
+      linear-gradient(-45deg, #e5e7eb 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #e5e7eb 75%),
+      linear-gradient(-45deg, transparent 75%, #e5e7eb 75%);
+    background-size: 24px 24px;
+    background-position: 0 0, 0 12px, 12px -12px, -12px 0px;
+  }
+  /* ============ end preview-only scaffolding ============ */
+
+  :root {
+    --grid: #B2BDD4;
+    --gray-dot: #959FB6;
+    --gray-outer: #73767D;
+    --accent: #801A36;
+    --label: #001647;
+  }
+
+  /* ============================================================
+     COPY FROM HERE — self-contained radar component
+     ============================================================ */
+  .radar-widget {
+    width: 100%;
+    max-width: 444px;   /* matches the Figma frame; scales down responsively below that */
+    background: transparent;
+  }
+
+  .radar-widget svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+  }
+
+  .radar-location text {
+    font-family: "Urbanist", -apple-system, "Helvetica Neue", Arial, sans-serif;
+    font-size: 11.225px;
+    font-weight: 400;
+    fill: var(--label);
+    text-anchor: middle;
+    user-select: none;
+  }
+
+  /* Visually-hidden live region for screen readers */
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+
+<div class="radar-widget" id="radarWidget" role="img" aria-label="Navigation radar sweeping across office locations">
+  <svg viewBox="0 0 444 444" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="lineGradient" x1="222.08" y1="0" x2="222.08" y2="221.59" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#001647"/>
+        <stop offset="1" stop-color="#DEE1E6" stop-opacity="0"/>
+      </linearGradient>
+      <linearGradient id="barGradient" x1="221.88" y1="80.05" x2="175.06" y2="226.76" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#0C40B4" stop-opacity="0.1"/>
+        <stop offset="1" stop-color="#DEE1E6" stop-opacity="0"/>
+      </linearGradient>
+      <linearGradient id="wedgeGradient" x1="221.88" y1="80.05" x2="175.06" y2="226.76" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#0C40B4" stop-opacity="0.1"/>
+        <stop offset="1" stop-color="#DEE1E6" stop-opacity="0"/>
+      </linearGradient>
+      <filter id="softGlow" x="-150%" y="-150%" width="400%" height="400%">
+        <feGaussianBlur stdDeviation="6" />
+      </filter>
+    </defs>
+
+    <!-- No background rect here on purpose — this is what makes the
+         component transparent. The page behind it shows through. -->
+
+    <!-- Static reference grid, straight from the Figma export -->
+    <g fill="none" stroke="var(--grid)" stroke-width="0.605" stroke-dasharray="4.84 4.84">
+      <circle cx="222.08" cy="221.59" r="221.29"/>
+      <circle cx="222.08" cy="221.59" r="186.32"/>
+      <circle cx="222.08" cy="221.59" r="152.35"/>
+      <circle cx="222.08" cy="221.59" r="116.89"/>
+      <circle cx="222.08" cy="221.59" r="83"/>
+      <circle cx="222.08" cy="221.59" r="48"/>
+    </g>
+
+    <!-- Sweep group: line + glow bar + fading trail wedge.
+         Rotated every frame via JS with a native SVG transform,
+         which keeps the userSpaceOnUse gradients locked to the line. -->
+    <g id="sweepGroup">
+      <line x1="222.08" y1="221.59" x2="222.08" y2="0" stroke="url(#lineGradient)" stroke-width="1.51"/>
+      <rect x="221.83" y="0" width="0.5" height="221.59" fill="url(#barGradient)"/>
+      <path d="M222.08 0
+               C222.08 0 123.64 -3.66 59.87 69.71
+               C-3.9 143.08 0.05 221.62 0.05 221.62
+               H222.08 Z"
+            fill="url(#wedgeGradient)"/>
+    </g>
+
+    <!-- Locations: purely data-driven, see LOCATIONS array in the script.
+         Add a new city by adding one entry — angle is computed automatically. -->
+    <g id="locations"></g>
+  </svg>
+</div>
+
+<span id="liveRegion" class="sr-only" aria-live="polite"></span>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ----------------------------------------------------------------
+     1. DATA — the only part most integrations need to touch.
+     Position each city with its pixel coordinate on the 444×444
+     canvas (matching the Figma frame). The sweep angle for each
+     location is derived automatically from its position, so you
+     never have to compute angles by hand.
+  ---------------------------------------------------------------- */
+  const LOCATIONS = [
+    { name: "Dubai",     x: 276.37, y: 364.56 },
+    { name: "Singapore", x: 367.77, y: 103.99 },
+    { name: "London",    x: 80.18,  y: 164.94 }
+  ];
+
+  const CENTER = { x: 222.08, y: 221.59 };
+  const ROTATION_MS = 9000;   // time for one full clockwise sweep
+  const TRAIL_DEGREES = 90;   // how wide the fading trail behind the line is
+  const BASE_R = { dot: 5.43, mid: 10.13, outer: 13.39 };
+  const ACTIVE_SCALE = 1.36;  // matches the size bump on the highlighted marker in the source file
+  const COLOR_INACTIVE = { dot: "#959FB6", mid: "#959FB6", outer: "#73767D" };
+  const COLOR_ACTIVE   = { dot: "#801A36", mid: "#801A36", outer: "#801A36" };
+
+  /* ---------------------------------------------------------------- */
+
+  const svgNS = "http://www.w3.org/2000/svg";
+  const widget = document.getElementById("radarWidget");
+  const sweepGroup = document.getElementById("sweepGroup");
+  const locationsGroup = document.getElementById("locations");
+  const liveRegion = document.getElementById("liveRegion");
+
+  function bearing(x, y) {
+    const east = x - CENTER.x;
+    const north = -(y - CENTER.y);
+    let deg = Math.atan2(east, north) * (180 / Math.PI);
+    return (deg + 360) % 360;
+  }
+
+  function hexToRgb(hex) {
+    const v = parseInt(hex.slice(1), 16);
+    return { r: (v >> 16) & 255, g: (v >> 8) & 255, b: v & 255 };
+  }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function lerpColor(hexA, hexB, t) {
+    const a = hexToRgb(hexA), b = hexToRgb(hexB);
+    return `rgb(${Math.round(lerp(a.r, b.r, t))}, ${Math.round(lerp(a.g, b.g, t))}, ${Math.round(lerp(a.b, b.b, t))})`;
+  }
+
+  // Build one marker (glow + outer ring + mid ring + dot + label) per location
+  const markers = LOCATIONS.map((loc) => {
+    const g = document.createElementNS(svgNS, "g");
+    g.setAttribute("class", "radar-location");
+    g.setAttribute("transform", `translate(${loc.x}, ${loc.y})`);
+
+    const glow = document.createElementNS(svgNS, "circle");
+    glow.setAttribute("r", BASE_R.outer * ACTIVE_SCALE);
+    glow.setAttribute("fill", COLOR_ACTIVE.dot);
+    glow.setAttribute("opacity", "0");
+    glow.setAttribute("filter", "url(#softGlow)");
+
+    const outer = document.createElementNS(svgNS, "circle");
+    outer.setAttribute("r", BASE_R.outer);
+    outer.setAttribute("fill", COLOR_INACTIVE.outer);
+    outer.setAttribute("opacity", "0.08");
+
+    const mid = document.createElementNS(svgNS, "circle");
+    mid.setAttribute("r", BASE_R.mid);
+    mid.setAttribute("fill", COLOR_INACTIVE.mid);
+    mid.setAttribute("opacity", "0.15");
+
+    const dot = document.createElementNS(svgNS, "circle");
+    dot.setAttribute("r", BASE_R.dot);
+    dot.setAttribute("fill", COLOR_INACTIVE.dot);
+
+    const label = document.createElementNS(svgNS, "text");
+    label.setAttribute("y", 34);
+    label.textContent = loc.name;
+
+    g.append(glow, outer, mid, dot, label);
+    locationsGroup.appendChild(g);
+
+    return { ...loc, angle: bearing(loc.x, loc.y), glow, outer, mid, dot };
+  });
+
+  function applyIntensity(marker, t) {
+    // t: 0 = fully inactive (gray, base size), 1 = sweep line is crossing it right now
+    const scale = lerp(1, ACTIVE_SCALE, t);
+    marker.dot.setAttribute("r", BASE_R.dot * scale);
+    marker.mid.setAttribute("r", BASE_R.mid * scale);
+    marker.outer.setAttribute("r", BASE_R.outer * scale);
+    marker.dot.setAttribute("fill", lerpColor(COLOR_INACTIVE.dot, COLOR_ACTIVE.dot, t));
+    marker.mid.setAttribute("fill", lerpColor(COLOR_INACTIVE.mid, COLOR_ACTIVE.mid, t));
+    marker.outer.setAttribute("fill", lerpColor(COLOR_INACTIVE.outer, COLOR_ACTIVE.outer, t));
+    marker.glow.setAttribute("opacity", (t * 0.45).toFixed(2));
+  }
+
+  /* ----------------------------------------------------------------
+     2. ANIMATION LOOP
+     A single rAF loop drives both the sweep rotation and every
+     marker's highlight, so they can never drift out of sync.
+  ---------------------------------------------------------------- */
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const duration = reduceMotion ? ROTATION_MS * 5 : ROTATION_MS;
+
+  let startTime = null;
+  let paused = false;
+  let pauseStartedAt = null;
+  let lastAnnounced = "";
+
+  function tick(now) {
+    if (startTime === null) startTime = now;
+    if (paused) { requestAnimationFrame(tick); return; }
+
+    const elapsed = now - startTime;
+    const angle = (elapsed / duration) * 360 % 360;
+
+    sweepGroup.setAttribute("transform", `rotate(${angle} ${CENTER.x} ${CENTER.y})`);
+
+    let active = null;
+    let bestIntensity = 0;
+
+    markers.forEach((marker) => {
+      const behind = (angle - marker.angle + 360) % 360;
+      const intensity = behind <= TRAIL_DEGREES ? 1 - behind / TRAIL_DEGREES : 0;
+      applyIntensity(marker, intensity);
+      if (intensity > bestIntensity) { bestIntensity = intensity; active = marker.name; }
+    });
+
+    if (active && active !== lastAnnounced && bestIntensity > 0.9) {
+      liveRegion.textContent = "Now scanning: " + active;
+      lastAnnounced = active;
+    }
+
+    requestAnimationFrame(tick);
+  }
+
+  requestAnimationFrame(tick);
+
+  // Pause on hover / keyboard focus so the sweep can be inspected.
+  function pause() {
+    if (paused) return;
+    paused = true;
+    pauseStartedAt = performance.now();
+    widget.dataset.paused = "true";
+  }
+  function resume() {
+    if (!paused) return;
+    startTime += performance.now() - pauseStartedAt;
+    paused = false;
+    widget.dataset.paused = "false";
+  }
+  widget.addEventListener("pointerenter", pause);
+  widget.addEventListener("pointerleave", resume);
+  widget.addEventListener("focusin", pause);
+  widget.addEventListener("focusout", resume);
+})();
+</script>
+<!-- ============================================================
+     COPY TO HERE
+     ============================================================ -->
+</body>
+</html>
